@@ -28,7 +28,7 @@ fs.mkdirSync(SHOT, { recursive: true });
 const shots = [];
 
 function log(msg) {
-  console.log(`[${new Date().toISOString()}] ${msg}`);
+  console.log('[' + new Date().toISOString() + '] ' + msg);
 }
 
 function norm(s) {
@@ -98,10 +98,10 @@ async function shot(page, name) {
     const p = path.join(SHOT, name);
     await page.screenshot({ path: p, fullPage: true });
     shots.push(p);
-    log(`截图 ${name}`);
+    log('截图 ' + name);
     return p;
   } catch (e) {
-    log(`截图失败 ${name}: ${e.message}`);
+    log('截图失败 ' + name + ': ' + e.message);
     return null;
   }
 }
@@ -115,11 +115,11 @@ async function sendTgPhoto(chat, token, photoPath, caption) {
     form.append('chat_id', chat);
     form.append('photo', new Blob([fs.readFileSync(photoPath)], { type: 'image/png' }), path.basename(photoPath));
     if (caption) form.append('caption', caption);
-    const r = await fetch(`https://api.telegram.org/bot${token}/sendPhoto`, { method: 'POST', body: form });
-    if (!r.ok) log(`TG 图片发送失败 ${path.basename(photoPath)}: ${await r.text()}`);
-    else log(`TG 图片已发送: ${path.basename(photoPath)}`);
+    const r = await fetch('https://api.telegram.org/bot' + token + '/sendPhoto', { method: 'POST', body: form });
+    if (!r.ok) log('TG 图片发送失败 ' + path.basename(photoPath) + ': ' + (await r.text()));
+    else log('TG 图片已发送: ' + path.basename(photoPath));
   } catch (e) {
-    log(`TG 图片发送异常: ${e.message}`);
+    log('TG 图片发送异常: ' + e.message);
   }
 }
 
@@ -131,13 +131,13 @@ async function tg(text, { photo = null } = {}) {
     return;
   }
   try {
-    const msg = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+    const msg = await fetch('https://api.telegram.org/bot' + token + '/sendMessage', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ chat_id: chat, text, parse_mode: 'HTML', disable_web_page_preview: true }),
     });
     if (!msg.ok) {
-      await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      await fetch('https://api.telegram.org/bot' + token + '/sendMessage', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ chat_id: chat, text, disable_web_page_preview: true }),
@@ -145,7 +145,7 @@ async function tg(text, { photo = null } = {}) {
     }
     log('TG 文本已发送');
   } catch (e) {
-    log(`TG 发送异常 (非致命): ${e.message}`);
+    log('TG 发送异常 (非致命): ' + e.message);
   }
 
   if (photo) {
@@ -178,23 +178,24 @@ function formatTgMessage({ failed, results = [], errorMsg = '' }) {
     badge = 'ℹ️ 暂未到可续期时间';
   }
 
+  const currentAccount = USER || '未设置';
   const lines = [
     title,
     '━━━━━━━━━━━━━━━━━━━━',
-    `🕒 <b>执行时间</b>: ${beijingTime} (北京时间)`,
-    `👤 <b>当前账号</b>: <code>${USER || '未设置'}</code>`,
-    `📊 <b>任务状态</b>: ${badge}`,
+    '🕒 <b>执行时间</b>: ' + beijingTime + ' (北京时间)',
+    '👤 <b>当前账号</b>: <code>' + currentAccount + '</code>',
+    '📊 <b>任务状态</b>: ' + badge,
     '━━━━━━━━━━━━━━━━━━━━',
     '<b>服务详情</b>:',
   ];
 
   if (failed && errorMsg) {
-    lines.push(`• 异常原因: ${errorMsg}`);
+    lines.push('• 异常原因: ' + errorMsg);
   }
 
   for (const r of results) {
     const icon = r.ok ? (r.skip ? '⏳' : '✅') : '❌';
-    lines.push(`• ${icon} ${r.text}`);
+    lines.push('• ' + icon + ' ' + r.text);
   }
 
   lines.push('━━━━━━━━━━━━━━━━━━━━');
@@ -217,7 +218,7 @@ async function ocrPick(dir, prompt, n) {
   });
   const results = [];
   for (let i = 0; i < n; i++) {
-    const file = path.join(dir, `${i}.png`);
+    const file = path.join(dir, i + '.png');
     const r = await worker.recognize(file);
     const text = (r.data.text || '').replace(/\s+/g, '').trim();
     const best = VOCAB.map((v) => ({ v, s: score(text, v) })).sort((p, q) => q.s - p.s)[0];
@@ -225,24 +226,30 @@ async function ocrPick(dir, prompt, n) {
   }
   await worker.terminate();
   results.sort((a, b) => b.vsPrompt - a.vsPrompt);
-  log(`OCR prompt=${prompt} ${results.map((x) => `${x.i}:${x.text \vert{}\vert{} x.guess}(${x.vsPrompt})`).join(' ')}`);
 
-  if (!results[0]) throw new Error(`OCR 无结果: ${prompt}`);
+  const summaryStr = results
+    .map((x) => {
+      const label = x.text ? x.text : x.guess;
+      return x.i + ':' + label + '(' + x.vsPrompt + ')';
+    })
+    .join(' ');
+  log('OCR prompt=' + prompt + ' ' + summaryStr);
+
+  if (!results[0]) throw new Error('OCR 无结果: ' + prompt);
   if (results[0].vsPrompt < OCR_MIN_SCORE) {
-    // 若最高分虽低于阈值，但明显领先第二名（>= 25分且>= 40分），则允许兜底尝试
     const secondScore = results[1]?.vsPrompt ?? 0;
     if (results[0].vsPrompt >= 40 && results[0].vsPrompt - secondScore >= 20) {
-      log(`OCR 分数(${results[0].vsPrompt})低于阈值(${OCR_MIN_SCORE})但明显领先,兜底选择 option ${results[0].i}`);
+      log('OCR 分数(' + results[0].vsPrompt + ')低于阈值(' + OCR_MIN_SCORE + ')但明显领先,兜底选择 option ' + results[0].i);
       return results[0].i;
     }
-    throw new Error(`OCR 未匹配 ${prompt} (阈值:${OCR_MIN_SCORE}): ${JSON.stringify(results)}`);
+    throw new Error('OCR 未匹配 ' + prompt + ' (阈值:' + OCR_MIN_SCORE + '): ' + JSON.stringify(results));
   }
   return results[0].i;
 }
 
 async function solveCaptcha(page, prefix = '') {
-  const root = prefix ? `${prefix} ` : '';
-  const checkbox = page.locator(`${root}div[role='checkbox']`).first();
+  const root = prefix ? prefix + ' ' : '';
+  const checkbox = page.locator(root + "div[role='checkbox']").first();
 
   if (await checkbox.isVisible().catch(() => false)) {
     const isChecked = await checkbox.getAttribute('aria-checked').catch(() => null);
@@ -253,11 +260,10 @@ async function solveCaptcha(page, prefix = '') {
     await checkbox.click();
   }
 
-  // 等待看是否直接无感通过，或者弹出图片选择
   const passedDirectly = await page
     .waitForFunction(
       (sel) => document.querySelector(sel)?.getAttribute('aria-checked') === 'true',
-      `${root}div[role='checkbox']`,
+      root + "div[role='checkbox']",
       { timeout: 3000 }
     )
     .then(() => true)
@@ -268,66 +274,66 @@ async function solveCaptcha(page, prefix = '') {
     return;
   }
 
-  await page.waitForSelector(`${root}.auth-captcha-option-img`, { timeout: 20000 });
+  await page.waitForSelector(root + '.auth-captcha-option-img', { timeout: 20000 });
   await page.waitForFunction(
     (sel) => {
       const imgs = [...document.querySelectorAll(sel)];
       return imgs.length > 0 && imgs.every((i) => i.naturalWidth > 0 && i.clientHeight > 0);
     },
-    `${root}.auth-captcha-option-img`,
+    root + '.auth-captcha-option-img',
     { timeout: 20000 }
   );
 
-  const promptRaw = await page.locator(`${root}.auth-captcha-prompt`).first().innerText();
+  const promptRaw = await page.locator(root + '.auth-captcha-prompt').first().innerText();
   const prompt = promptRaw
     .replace(/^(?:Click on|Cliquez sur|Select|Choisissez)\s*(?:the|le|la|l')?\s*/i, '')
     .replace(/[.:!?\s]+$/, '')
     .trim();
 
-  const imgs = page.locator(`${root}.auth-captcha-option-img`);
+  const imgs = page.locator(root + '.auth-captcha-option-img');
   const n = await imgs.count();
   const dir = path.join(SHOT, 'captcha');
   fs.mkdirSync(dir, { recursive: true });
 
   for (let i = 0; i < n; i++) {
     const src = await imgs.nth(i).getAttribute('src');
-    const url = src.startsWith('http') ? src : `${BASE}${src.startsWith('/') ? '' : '/'}${src}`;
+    const url = src.startsWith('http') ? src : BASE + (src.startsWith('/') ? '' : '/') + src;
     const bytes = await page.evaluate(async (u) => {
       const r = await fetch(u, { credentials: 'include' });
       return Array.from(new Uint8Array(await r.arrayBuffer()));
     }, url);
-    fs.writeFileSync(path.join(dir, `${i}.png`), Buffer.from(bytes));
+    fs.writeFileSync(path.join(dir, i + '.png'), Buffer.from(bytes));
   }
 
   await shot(page, '02-captcha.png');
   const pick = await ocrPick(dir, prompt, n);
-  await page.locator(`${root}.auth-captcha-option`).nth(pick).evaluate((el) => el.click());
+  await page.locator(root + '.auth-captcha-option').nth(pick).evaluate((el) => el.click());
 
   await page.waitForFunction(
     (sel) => {
       const cb = document.querySelector(sel);
-      if (!cb) return true; // 如果是弹窗模式，点击后弹窗可能直接消失
+      if (!cb) return true;
       return cb.getAttribute('aria-checked') === 'true';
     },
-    `${root}div[role='checkbox']`,
+    root + "div[role='checkbox']",
     { timeout: 15000 }
   );
-  log(`验证码通过: ${prompt} -> option ${pick + 1}`);
+  log('验证码通过: ' + prompt + ' -> option ' + (pick + 1));
 }
 
 async function solveCaptchaApi(page, context = 'renewal_gate') {
-  log(`通过 API 求解验证码 (context: ${context})...`);
+  log('通过 API 求解验证码 (context: ' + context + ')...');
   let lastErr = null;
 
   for (let attempt = 1; attempt <= CAPTCHA_MAX_ATTEMPTS; attempt++) {
     try {
       if (attempt > 1) {
-        log(`API 验证码重试 ${attempt}/${CAPTCHA_MAX_ATTEMPTS}`);
+        log('API 验证码重试 ' + attempt + '/' + CAPTCHA_MAX_ATTEMPTS);
       }
 
-      const challengeRes = await api(page, `/auth/captcha/challenge?context=${encodeURIComponent(context)}`);
+      const challengeRes = await api(page, '/auth/captcha/challenge?context=' + encodeURIComponent(context));
       if (challengeRes.status !== 200 || !challengeRes.data?.id) {
-        throw new Error(`获取验证码 challenge 失败: HTTP ${challengeRes.status} ${JSON.stringify(challengeRes.data)}`);
+        throw new Error('获取验证码 challenge 失败: HTTP ' + challengeRes.status + ' ' + JSON.stringify(challengeRes.data));
       }
       const chal = challengeRes.data;
       await page.waitForTimeout(1300);
@@ -341,7 +347,7 @@ async function solveCaptchaApi(page, context = 'renewal_gate') {
       });
 
       if (initialVerify.status !== 200) {
-        throw new Error(`验证码初始验证失败: HTTP ${initialVerify.status} ${JSON.stringify(initialVerify.data)}`);
+        throw new Error('验证码初始验证失败: HTTP ' + initialVerify.status + ' ' + JSON.stringify(initialVerify.data));
       }
 
       const ver = initialVerify.data;
@@ -351,7 +357,7 @@ async function solveCaptchaApi(page, context = 'renewal_gate') {
       }
 
       if (!ver.interactive || !ver.target || !Array.isArray(ver.options)) {
-        throw new Error(`验证码返回非交互态: ${JSON.stringify(ver)}`);
+        throw new Error('验证码返回非交互态: ' + JSON.stringify(ver));
       }
 
       const target = String(ver.target)
@@ -363,7 +369,7 @@ async function solveCaptchaApi(page, context = 'renewal_gate') {
 
       if (directPick) {
         pick = directPick.i;
-        log(`验证码命中文本选项: prompt=${target} option=${directPick.text} score=${directPick.s}`);
+        log('验证码命中文本选项: prompt=' + target + ' option=' + directPick.text + ' score=' + directPick.s);
       } else {
         const dir = path.join(SHOT, 'captcha_api');
         fs.mkdirSync(dir, { recursive: true });
@@ -373,14 +379,14 @@ async function solveCaptchaApi(page, context = 'renewal_gate') {
           const imgUrl = optStr.startsWith('http')
             ? optStr
             : optStr.startsWith('/')
-            ? `${BASE}${optStr}`
-            : `${BASE}/auth/captcha/image?t=${encodeURIComponent(optStr)}`;
+            ? BASE + optStr
+            : BASE + '/auth/captcha/image?t=' + encodeURIComponent(optStr);
 
           const bytes = await page.evaluate(async (u) => {
             const r = await fetch(u, { credentials: 'include' });
             return Array.from(new Uint8Array(await r.arrayBuffer()));
           }, imgUrl);
-          fs.writeFileSync(path.join(dir, `${i}.png`), Buffer.from(bytes));
+          fs.writeFileSync(path.join(dir, i + '.png'), Buffer.from(bytes));
         }
 
         pick = await ocrPick(dir, target, options.length);
@@ -401,25 +407,26 @@ async function solveCaptchaApi(page, context = 'renewal_gate') {
       });
 
       if (submitVerify.status === 200 && submitVerify.data?.passed && submitVerify.data?.token) {
-        log(`API 验证码成功解决: ${target} -> token 获得`);
+        log('API 验证码成功解决: ' + target + ' -> token 获得');
         return submitVerify.data.token;
       }
 
-      throw new Error(`API 验证码选项提交未通过: ${JSON.stringify(submitVerify.data)}`);
+      throw new Error('API 验证码选项提交未通过: ' + JSON.stringify(submitVerify.data));
     } catch (e) {
       lastErr = e;
-      log(`API 验证码第 ${attempt} 次失败: ${e.message}`);
+      log('API 验证码第 ' + attempt + ' 次失败: ' + e.message);
       if (attempt < CAPTCHA_MAX_ATTEMPTS) {
         await page.waitForTimeout(1500);
       }
     }
   }
 
-  throw new Error(`API 验证码连续失败 ${CAPTCHA_MAX_ATTEMPTS} 次: ${lastErr?.message || '未知错误'}`);
+  const lastMsg = lastErr ? lastErr.message : '未知错误';
+  throw new Error('API 验证码连续失败 ' + CAPTCHA_MAX_ATTEMPTS + ' 次: ' + lastMsg);
 }
 
 async function api(page, p, method = 'GET', body, extraHeaders = {}) {
-  const fullUrl = p.startsWith('http') ? p : `${BASE}${p.startsWith('/') ? '' : '/'}${p}`;
+  const fullUrl = p.startsWith('http') ? p : BASE + (p.startsWith('/') ? '' : '/') + p;
   return page.evaluate(
     async ({ fullUrl, method, body, extraHeaders }) => {
       try {
@@ -479,8 +486,8 @@ async function fillLoginCredentials(page) {
 }
 
 async function login(page) {
-  log(`登录 ${BASE} as ${USER}`);
-  await page.goto(`${BASE}/dashboard`, { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
+  log('登录 ' + BASE + ' as ' + USER);
+  await page.goto(BASE + '/dashboard', { waitUntil: 'domcontentloaded', timeout: 30000 }).catch(() => {});
   await page.waitForTimeout(1000);
 
   if (await loggedIn(page)) {
@@ -494,7 +501,7 @@ async function login(page) {
     try { fs.unlinkSync(AUTH); } catch {}
   }
 
-  await page.goto(`${BASE}/auth/login`, { waitUntil: 'domcontentloaded', timeout: 30000 });
+  await page.goto(BASE + '/auth/login', { waitUntil: 'domcontentloaded', timeout: 30000 });
   await fillLoginCredentials(page);
   await shot(page, '01-login.png');
 
@@ -504,8 +511,8 @@ async function login(page) {
       await solveCaptcha(page);
       authed = true;
     } catch (e) {
-      log(`登录验证码失败(${i + 1}/4): ${e.message}`);
-      await page.goto(`${BASE}/auth/login`, { waitUntil: 'domcontentloaded' });
+      log('登录验证码失败(' + (i + 1) + '/4): ' + e.message);
+      await page.goto(BASE + '/auth/login', { waitUntil: 'domcontentloaded' });
       await fillLoginCredentials(page);
     }
   }
@@ -514,19 +521,18 @@ async function login(page) {
   const submitBtn = page.locator("button[type='submit'], input[type='submit']").first();
   await submitBtn.click();
 
-  await page.waitForFunction(
-    () => !window.location.pathname.includes('/auth/login'),
-    { timeout: 25000 }
-  ).catch(async () => {
-    // 检查是否实际已登录
-    if (!(await loggedIn(page))) {
-      const errText = await page.locator('.alert, .error, [role="alert"], .text-red-500').first().innerText().catch(() => '');
-      throw new Error(`登录后未跳转到 dashboard ${errText ? `(${errText.trim()})` : ''}`);
-    }
-  });
+  await page
+    .waitForFunction(() => !window.location.pathname.includes('/auth/login'), { timeout: 25000 })
+    .catch(async () => {
+      if (!(await loggedIn(page))) {
+        const errText = await page.locator('.alert, .error, [role="alert"], .text-red-500').first().innerText().catch(() => '');
+        const extra = errText ? ' (' + errText.trim() + ')' : '';
+        throw new Error('登录后未跳转到 dashboard' + extra);
+      }
+    });
 
   await page.context().storageState({ path: AUTH });
-  log(`登录成功,会话写入 ${AUTH}`);
+  log('登录成功,会话写入 ' + AUTH);
 }
 
 function formatRemaining(expiresAt) {
@@ -545,7 +551,7 @@ function formatRemaining(expiresAt) {
     hour: '2-digit',
     minute: '2-digit',
   });
-  return `${d}天${h}小时 (到期: ${expStr})`;
+  return d + '天' + h + '小时 (到期: ' + expStr + ')';
 }
 
 async function discover(page) {
@@ -564,12 +570,10 @@ async function discover(page) {
     });
   };
 
-  // 如果环境变量明确指定了 ACL_SERVER_ID，优先使用
   if (SERVER_ID) {
     addServer({ id: SERVER_ID, uuid: SERVER_ID, name: SERVER_ID });
   }
 
-  // 途径 1: /api/client
   const r1 = await api(page, '/api/client');
   if (r1.status === 200) {
     const list = Array.isArray(r1.data?.data) ? r1.data.data : Array.isArray(r1.data?.servers) ? r1.data.servers : [];
@@ -582,13 +586,12 @@ async function discover(page) {
           uuid: attr.uuid || id,
           name: attr.name || attr.project_name || String(id),
           expiresAt: attr.expires_at || attr.renews_at || null,
-          canRenew: !!attr.can_renew,
+          canRenew: Boolean(attr.can_renew),
         });
       }
     }
   }
 
-  // 途径 2: /api/client/credits/subscriptions (README 提及的订阅接口)
   const r2 = await api(page, '/api/client/credits/subscriptions');
   if (r2.status === 200) {
     const rawList = Array.isArray(r2.data?.data)
@@ -613,41 +616,39 @@ async function discover(page) {
           uuid: attr.uuid || id,
           name: attr.name || attr.server_name || item.name || String(id),
           expiresAt: attr.expires_at || item.expires_at || attr.renews_at || null,
-          canRenew: !!(attr.can_renew ?? item.can_renew),
+          canRenew: Boolean(attr.can_renew ?? item.can_renew),
         });
       }
     }
   }
 
-  // 途径 3: 扫描 /dashboard/projects 页面 DOM 属性与链接
-  await page.goto(`${BASE}/dashboard/projects`, { waitUntil: 'domcontentloaded' }).catch(() => {});
+  await page.goto(BASE + '/dashboard/projects', { waitUntil: 'domcontentloaded' }).catch(() => {});
   await page.waitForTimeout(1500);
 
-  const domIds = await page.evaluate(() => {
-    const found = [];
-    // 查找 data-server-id / data-server 等属性
-    document.querySelectorAll('[data-server-id], [data-server], [data-identifier]').forEach((el) => {
-      const val =
-        el.getAttribute('data-server-id') ||
-        el.getAttribute('data-server') ||
-        el.getAttribute('data-identifier');
-      if (val) found.push(val.trim());
-    });
-    // 查找指向 server 的链接
-    document.querySelectorAll('a[href]').forEach((a) => {
-      const href = a.getAttribute('href') || '';
-      const m = href.match(/\/(?:server|servers|projects)\/([a-f0-9]{8})(?:\/|$|\?)/i);
-      if (m) found.push(m[1]);
-    });
-    // 查找页面内嵌脚本中的 identifier
-    const html = document.documentElement.innerHTML;
-    const regex = /"identifier"\s*:\s*"([a-f0-9]{8})"/gi;
-    let match;
-    while ((match = regex.exec(html)) !== null) {
-      found.push(match[1]);
-    }
-    return [...new Set(found)];
-  }).catch(() => []);
+  const domIds = await page
+    .evaluate(() => {
+      const found = [];
+      document.querySelectorAll('[data-server-id], [data-server], [data-identifier]').forEach((el) => {
+        const val =
+          el.getAttribute('data-server-id') ||
+          el.getAttribute('data-server') ||
+          el.getAttribute('data-identifier');
+        if (val) found.push(val.trim());
+      });
+      document.querySelectorAll('a[href]').forEach((a) => {
+        const href = a.getAttribute('href') || '';
+        const m = href.match(/\/(?:server|servers|projects)\/([a-f0-9]{8})(?:\/|$|\?)/i);
+        if (m) found.push(m[1]);
+      });
+      const html = document.documentElement.innerHTML;
+      const regex = /"identifier"\s*:\s*"([a-f0-9]{8})"/gi;
+      let match;
+      while ((match = regex.exec(html)) !== null) {
+        found.push(match[1]);
+      }
+      return [...new Set(found)];
+    })
+    .catch(() => []);
 
   for (const id of domIds) {
     if (!map.has(id)) {
@@ -655,25 +656,31 @@ async function discover(page) {
     }
   }
 
-  // 如果配置了 SERVER_ID，只保留指定的 SERVER_ID（与 README 行为一致：设了则只打这一台）
   let servers = [...map.values()];
   if (SERVER_ID) {
     const matched = servers.filter((s) => s.id === SERVER_ID || s.uuid === SERVER_ID);
     if (matched.length > 0) servers = matched;
   }
 
-  log(`发现服务: ${servers.map((s) => `${s.name}(${s.id}) 到期:${s.expiresAt || '未知'}`).join(', ') || '(无)'}`);
+  const serverLogStr = servers
+    .map((s) => {
+      const exp = s.expiresAt ? s.expiresAt : '未知';
+      return s.name + '(' + s.id + ') 到期:' + exp;
+    })
+    .join(', ');
+  log('发现服务: ' + (serverLogStr ? serverLogStr : '(无)'));
   return servers;
 }
 
 function classifyRenew(r) {
   if (r.status === 200) {
-    const exp = r.data?.expires_at ? ` (到期: ${r.data.expires_at})` : '';
+    const exp = r.data?.expires_at ? ' (到期: ' + r.data.expires_at + ')' : '';
+    const msg = r.data?.message ? r.data.message : JSON.stringify(r.data).slice(0, 120);
     return {
       ok: true,
       skip: false,
       captcha: false,
-      text: `续期成功${exp} ${r.data?.message || JSON.stringify(r.data).slice(0, 120)}`,
+      text: '续期成功' + exp + ' ' + msg,
     };
   }
   const blob = JSON.stringify(r.data || {});
@@ -683,17 +690,18 @@ function classifyRenew(r) {
       r.data?.code === 'renewal_not_available' ||
       /renewal_not_available|not_available|pas encore disponible/i.test(blob))
   ) {
+    const rem = r.data?.days_remaining ?? r.data?.hours_remaining ?? '?';
     return {
       ok: true,
       skip: true,
       captcha: false,
-      text: `未到续期窗口 剩余 ${r.data?.days_remaining ?? r.data?.hours_remaining ?? '?'} 天/小时`,
+      text: '未到续期窗口 剩余 ' + rem + ' 天/小时',
     };
   }
   if ((r.status === 403 || r.status === 400 || r.status === 422) && /captcha_required|captcha/i.test(blob)) {
-    return { ok: false, skip: false, captcha: true, text: `HTTP ${r.status} captcha_required` };
+    return { ok: false, skip: false, captcha: true, text: 'HTTP ' + r.status + ' captcha_required' };
   }
-  return { ok: false, skip: false, captcha: false, text: `HTTP ${r.status} ${blob.slice(0, 180)}` };
+  return { ok: false, skip: false, captcha: false, text: 'HTTP ' + r.status + ' ' + blob.slice(0, 180) };
 }
 
 function looksLikeRenewAction(text) {
@@ -744,7 +752,7 @@ async function findVisibleRenewButton(page, server) {
 
     if (!info || !looksLikeRenewAction(info.text) || info.disabled || info.busy || !info.visible) continue;
 
-    const haystack = `${info.cardText} ${info.text}`.toLowerCase();
+    const haystack = (info.cardText + ' ' + info.text).toLowerCase();
     let s = 100;
     if (server?.id && haystack.includes(String(server.id).toLowerCase())) s += 50;
     if (server?.uuid && haystack.includes(String(server.uuid).toLowerCase())) s += 40;
@@ -756,7 +764,7 @@ async function findVisibleRenewButton(page, server) {
 
   scored.sort((a, b) => b.score - a.score);
   if (!scored.length) return null;
-  log(`选择可见续期按钮: ${JSON.stringify(scored[0].info.text).slice(0, 120)}`);
+  log('选择可见续期按钮: ' + JSON.stringify(scored[0].info.text).slice(0, 120));
   return scored[0].item;
 }
 
@@ -775,17 +783,16 @@ async function clickRenewUi(page, server) {
 async function tryRenew(page, server) {
   const id = server.id;
   const name = server.name || id;
-  log(`开始检查续期: ${name} (${id})`);
+  log('开始检查续期: ' + name + ' (' + id + ')');
 
-  if (DRY_RUN) return { id, ok: true, skip: true, text: `[DRY_RUN] ${name} (${id}) 跳过实际提交` };
+  if (DRY_RUN) return { id, ok: true, skip: true, text: '[DRY_RUN] ' + name + ' (' + id + ') 跳过实际提交' };
 
-  // 1. 尝试 UI 自动化续期
-  await page.goto(`${BASE}/dashboard/projects`, { waitUntil: 'domcontentloaded' }).catch(() => {});
+  await page.goto(BASE + '/dashboard/projects', { waitUntil: 'domcontentloaded' }).catch(() => {});
   await page.waitForTimeout(1500);
 
   let uiRenewRes = null;
   const responseHandler = async (res) => {
-    if (res.url().includes(`/servers/${id}/upgrade/renew`) && res.request().method() === 'POST') {
+    if (res.url().includes('/servers/' + id + '/upgrade/renew') && res.request().method() === 'POST') {
       try {
         const text = await res.text();
         let data;
@@ -799,62 +806,62 @@ async function tryRenew(page, server) {
   try {
     const clicked = await clickRenewUi(page, server);
     if (clicked) {
-      log(`已点击可见 UI 续期按钮,等待结果...`);
+      log('已点击可见 UI 续期按钮,等待结果...');
 
       const modal = page.locator("[role='dialog']");
       if ((await modal.count()) > 0 && (await modal.first().isVisible().catch(() => false))) {
         log('检测到防机器人人机验证弹窗,开始过盾...');
         try {
           await solveCaptcha(page, "[role='dialog']");
-          // 如果弹窗内还有确认提交按钮，点击它
-          const confirmBtn = modal.locator("button[type='submit'], button:has-text('Renew'), button:has-text('Renouveler'), button:has-text('Confirm'), button:has-text('Valider')").first();
+          const confirmBtn = modal
+            .locator("button[type='submit'], button:has-text('Renew'), button:has-text('Renouveler'), button:has-text('Confirm'), button:has-text('Valider')")
+            .first();
           if (await confirmBtn.isVisible().catch(() => false)) {
             await confirmBtn.click().catch(() => {});
           }
           await page.waitForTimeout(3500);
         } catch (e) {
-          log(`弹窗验证码处理异常: ${e.message}`);
+          log('弹窗验证码处理异常: ' + e.message);
         }
       }
 
       if (uiRenewRes) {
         const c = classifyRenew(uiRenewRes);
         if (c.ok) {
-          log(`UI 触发 API 响应成功: ${c.text}`);
-          return { id, ok: true, skip: c.skip, text: `${name} (${id}): ${c.text}` };
+          log('UI 触发 API 响应成功: ' + c.text);
+          return { id, ok: true, skip: c.skip, text: name + ' (' + id + '): ' + c.text };
         }
       }
 
       const bodyText = await page.evaluate(() => document.body.innerText).catch(() => '');
       if (/Expire dans\s+[2-9]j/i.test(bodyText) || /renouvellement sera disponible/i.test(bodyText)) {
         const match = bodyText.match(/Expire dans\s+([0-9]+j(?:\s+[0-9]+h)?)/i);
-        const exp = match ? `剩余 ${match[1]}` : '成功延期';
-        log(`UI 续期验证成功: ${exp}`);
-        return { id, ok: true, skip: false, text: `${name} (${id}): 续期成功 (${exp})` };
+        const exp = match ? '剩余 ' + match[1] : '成功延期';
+        log('UI 续期验证成功: ' + exp);
+        return { id, ok: true, skip: false, text: name + ' (' + id + '): 续期成功 (' + exp + ')' };
       }
       log('UI 点击后未确认续期成功,继续尝试 API 续期接口');
     }
   } catch (e) {
-    log(`UI 续期按钮点击失败,改走 API 续期: ${e.message}`);
-    await shot(page, `ui-click-fallback-${id}.png`).catch(() => {});
+    log('UI 续期按钮点击失败,改走 API 续期: ' + e.message);
+    await shot(page, 'ui-click-fallback-' + id + '.png').catch(() => {});
   } finally {
     page.off('response', responseHandler);
   }
 
-  // 2. API 直接续期及验证码补发
-  log(`尝试 API 续期接口...`);
-  const renewPath = `/api/client/servers/${id}/upgrade/renew`;
+  log('尝试 API 续期接口...');
+  const renewPath = '/api/client/servers/' + id + '/upgrade/renew';
   let r = await api(page, renewPath, 'POST', {});
   let c = classifyRenew(r);
 
   if (c.captcha) {
-    log(`检测到 captcha_required,获取 renewal_gate 验证码凭据...`);
+    log('检测到 captcha_required,获取 renewal_gate 验证码凭据...');
     try {
       let token;
       try {
         token = await solveCaptchaApi(page, 'renewal_gate');
       } catch (errGate) {
-        log(`renewal_gate 获取失败(${errGate.message}),尝试 default/login 上下文...`);
+        log('renewal_gate 获取失败(' + errGate.message + '),尝试 login 上下文...');
         token = await solveCaptchaApi(page, 'login');
       }
       r = await api(
@@ -866,17 +873,17 @@ async function tryRenew(page, server) {
       );
       c = classifyRenew(r);
     } catch (e) {
-      c = { ok: false, skip: false, captcha: false, text: `验证码求解失败: ${e.message}` };
+      c = { ok: false, skip: false, captcha: false, text: '验证码求解失败: ' + e.message };
     }
   }
 
-  let resultText = `${name} (${id}): ${c.text}`;
+  let resultText = name + ' (' + id + '): ' + c.text;
   const exactRemaining = formatRemaining(server.expiresAt);
   if (c.skip && exactRemaining) {
-    resultText = `${name} (${id}): 未到续期窗口，剩余 ${exactRemaining}`;
+    resultText = name + ' (' + id + '): 未到续期窗口，剩余 ' + exactRemaining;
   }
 
-  log(`API 续期结果: ${resultText}`);
+  log('API 续期结果: ' + resultText);
   return { id, ok: c.ok, skip: c.skip, text: resultText };
 }
 
@@ -940,7 +947,7 @@ async function main() {
     }
   } catch (e) {
     failed = true;
-    summary = `执行失败: ${e.message}`;
+    summary = '执行失败: ' + e.message;
     log(summary);
     await shot(page, '99-error.png');
   } finally {
